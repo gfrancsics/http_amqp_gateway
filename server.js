@@ -102,11 +102,11 @@ app.get('/udvozlet', (req, res) => {
 app.get('/health', (req, res) => {
     // Ha még soha nem jött POST kérés, a connection null lesz. 
     // Ez nem hiba, csak még "hideg" a szerver.
-    if (!connection) {
+    if (!sharedConnection) {
         return res.status(200).json({ status: "ok", message: "Server is idle (RabbitMQ not yet initialized)" });
     }
 
-    const isWritable = connection.connection.stream.writable;
+    const isWritable = sharedConnection.connection.stream.writable;
     res.status(isWritable ? 200 : 503).json({
         status: isWritable ? "ok" : "error",
         rabbitmq: isWritable ? "connected" : "disconnected"
