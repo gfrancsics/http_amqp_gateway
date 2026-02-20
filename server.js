@@ -22,17 +22,26 @@ async function sendMessage(message) {
         const messageString = JSON.stringify(message);
         const messageBuffer = Buffer.from(messageString);
 
-        // 1. Exchange deklarálása a Producer oldalon is (fanout típus)
-        await sharedChannel.assertExchange(EXCHANGE_NAME, 'fanout', {
-            durable: true
+        // 1. Exchange deklarálása (marad)
+        await sharedChannel.assertExchange(EXCHANGE_NAME, 'fanout', { durable: true });
+
+        // 2. ÚJ: Sor deklarálása a Producernél is!
+        // Fontos: a név (pl. 'hibak_sora') egyezzen a Consumerével!
+        const QUEUE_NAME = 'hibajelentesek_sora';
+        await sharedChannel.assertQueue(QUEUE_NAME, {
+            durable: true,    // Túlélje a restartot
+            exclusive: false,
+            autoDelete: false // Ne törölje le magát, ha nincs consumer!
         });
 
-        // 2. Publikálás a fanout Exchange-re
-        // A routingKey-nek üres stringnek kell lennie (''), 
-        // mivel a fanout Exchange ignorálja.
+        // 3. ÚJ: Összekötjük a sort az exchange-el
+        // Ez mondja meg a RabbitMQ-nak, hogy amit az exchange kap, azt tegye ebbe a sorba
+        await sharedChannel.bindQueue(QUEUE_NAME, EXCHANGE_NAME, '');
+
+        // 4. Publikálás (marad a persistent: true)
         const sent = await sharedChannel.publish(
-            EXCHANGE_NAME, // A Exchange, amire publikálunk
-            '',            // Routing Key: Üresen hagyjuk
+            EXCHANGE_NAME,
+            '',
             messageBuffer,
             { persistent: true }
         );
