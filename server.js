@@ -86,6 +86,9 @@ app.post('/uzenet', async (req, res) => {
 
         res.status(200).send({ status: "Siker!" });
 
+        // Várjunk 100 milliszekundumot (ez általában elég)
+        await new Promise(resolve => setTimeout(resolve, 100));
+
         if (sharedConnection) {
             console.log('Close AMQP connection.');
             await sharedConnection.close();
