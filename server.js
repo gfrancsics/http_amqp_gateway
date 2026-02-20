@@ -84,23 +84,38 @@ const createUniqeIDFromTimeStamp = function (timeStamp) {
 app.use(cors()); // Ez engedélyezi a CORS-t mindenki számára
 app.use(express.json());
 
+/**
+ * GET /udvozlet
+ * Ez a végpont csak egy egyszerű üdvözlő üzenetet küld vissza.
+ */
 app.get('/udvozlet', (req, res) => {
     console.log("Udvozol a HTTP AMQP GATEWAY!");
     // Itt küldhetnéd tovább a RabbitMQ-nak!
     res.status(200).send({ message: "Udvozol a HTTP AMQP GATEWAY!" });
 });
 
-app.get('/keepalive', (req, res) => {
-    console.log('This is a keep-alive transaction, to test the server connection.');
-    res.status(200).send({ message: "Done." });
-})
+/**
+ * GET /health
+ * Ez a végpont ellenőrzi, hogy a RabbitMQ kapcsolat él-e.
+ * Ha még soha nem jött POST kérés, a connection null lesz, de ez nem hiba, csak még "hideg" a szerver.
+ */
+app.get('/health', (req, res) => {
+    // Ha még soha nem jött POST kérés, a connection null lesz. 
+    // Ez nem hiba, csak még "hideg" a szerver.
+    if (!connection) {
+        return res.status(200).json({ status: "ok", message: "Server is idle (RabbitMQ not yet initialized)" });
+    }
+
+    const isWritable = connection.connection.stream.writable;
+    res.status(isWritable ? 200 : 503).json({
+        status: isWritable ? "ok" : "error",
+        rabbitmq: isWritable ? "connected" : "disconnected"
+    });
+});
 
 /**
- * POST
- * 
- * 1. Initialize RabbitMQ connection
- * 2. Send a Message
- * 3. Close the connection
+ * POST /uzenet
+ * Ez a végpont fogadja a hibajelentéseket, létrehoz egy üzenet objektumot, és elküldi a RabbitMQ-nak.
  * 
  */
 app.post('/uzenet', async (req, res) => {
