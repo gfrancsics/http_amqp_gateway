@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const amqp = require('amqplib');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 
@@ -74,15 +75,32 @@ const gracefulShutdown = async () => {
 };
 
 /**
- * 
+ * Create a unique ID based on the current timestamp and a random string.
+ * This ensures that each message has a unique identifier, which can be useful for tracking and debugging.
  */
 const createUniqeIDFromTimeStamp = function (timeStamp) {
     return timeStamp ? timeStamp.getTime().toString(36) + Math.random().toString(36).substring(2, 10) : null;
 }
 
+/**
+ * Rate limiting middleware: maximum 10 POST requests per IP every 15 minutes.
+ */
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 perc
+    max: 10, // IP-nként max 10 kérés 15 perc alatt
+    message: {
+        hiba: "Túl sok hibabejelentés! Kérlek várj egy kicsit."
+    },
+    standardHeaders: true, // Visszaküldi a 'RateLimit-*' fejléceket
+    legacyHeaders: false,
+});
+
 
 app.use(cors()); // Ez engedélyezi a CORS-t mindenki számára
 app.use(express.json());
+
+//Fontos Render-en: bízzunk a proxy-ban az IP címekhez
+app.set('trust proxy', 1);
 
 /**
  * GET /udvozlet
@@ -118,7 +136,7 @@ app.get('/health', (req, res) => {
  * Ez a végpont fogadja a hibajelentéseket, létrehoz egy üzenet objektumot, és elküldi a RabbitMQ-nak.
  * 
  */
-app.post('/uzenet', async (req, res) => {
+app.post('/uzenet', limiter, async (req, res) => {
     const activeChannel = await getChannel();
 
     if (!activeChannel) {
