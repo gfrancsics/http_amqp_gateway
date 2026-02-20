@@ -58,12 +58,12 @@ async function getChannel() {
 const gracefulShutdown = async () => {
     console.log("⚠️ Render leállási jel érkezett. Kapcsolatok zárása...");
     try {
-        if (channel) {
-            await channel.close();
+        if (sharedChannel) {
+            await sharedChannel.close();
             console.log("✅ RabbitMQ csatorna lezárva.");
         }
-        if (connection) {
-            await connection.close();
+        if (sharedConnection) {
+            await sharedConnection.close();
             console.log("✅ RabbitMQ kapcsolat lezárva.");
         }
     } catch (err) {
