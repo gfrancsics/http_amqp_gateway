@@ -115,14 +115,14 @@ app.post('/uzenet', async (req, res) => {
     const message = {
         id: uniqeID,
         topic: 'hibabejelento',
-        message: Buffer.from(JSON.stringify(req.body)),
+        message: req.body,
         timestamp: new Date().toISOString()
     };
 
     const sent = activeChannel.publish(
         EXCHANGE_NAME,
         '',
-        message,
+        Buffer.from(JSON.stringify(message)),
         { persistent: true }
     );
 
