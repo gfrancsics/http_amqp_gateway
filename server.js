@@ -147,8 +147,10 @@ app.post('/uzenet', limiter, async (req, res) => {
 
     const message = {
         id: uniqeID,
-        topic: 'hibabejelento',
-        message: req.body,
+        email: req.body.email || "nincs megadva",
+        topic: req.body.topic || "általános hiba",
+        message: req.body.message || "Nincs részletes üzenet",
+        urgent: req.body.urgent || false,
         timestamp: new Date().toISOString()
     };
 
