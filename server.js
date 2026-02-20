@@ -4,8 +4,8 @@ const amqp = require('amqplib');
 
 const app = express();
 
-const CLOUDAMQP_URL = 'amqps://efrhhyke:pyP8fjOBbh022nGhZp5GQDHoCoaUEEO9@cow.rmq2.cloudamqp.com/efrhhyke';
-const EXCHANGE_NAME = 'game_logs';
+const CLOUDAMQP_URL = 'amqps://vpwdmwwi:5WAHg6cVzwB0duCEeznFHl_W0eqfyF27@cow.rmq2.cloudamqp.com/vpwdmwwi';
+const EXCHANGE_NAME = 'email';
 let sharedConnection = null;
 let sharedChannel = null;
 
