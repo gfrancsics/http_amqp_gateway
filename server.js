@@ -6,55 +6,80 @@ const app = express();
 
 const CLOUDAMQP_URL = 'amqps://vpwdmwwi:5WAHg6cVzwB0duCEeznFHl_W0eqfyF27@cow.rmq2.cloudamqp.com/vpwdmwwi';
 const EXCHANGE_NAME = 'email';
+const QUEUE_NAME = 'hibajelentesek_sora';
+
 let sharedConnection = null;
 let sharedChannel = null;
 
-// ----------------------------------------------------
-// Függvény a RabbitMQ üzenetküldéshez
-// ----------------------------------------------------
-async function sendMessage(message) {
-    if (!sharedChannel) {
-        console.error("❌ Hiba: A RabbitMQ csatorna még nincs inicializálva.");
-        return;
+/**
+ * LASY INITIALISATION
+ * RENDER sends our service to sleep after 15 minutes of inactivity.
+ * Therefore we have to check the connection before every HTTP request.
+ * If the connection is not ready we have to reinitialise but if it is working,
+ * there is no need to do it again.
+ */
+async function getChannel() {
+    // Ha már van élő kapcsolat és csatormna, egyszerűen adjuk vissza
+    if (sharedConnection && sharedChannel) {
+        return sharedChannel;
     }
 
     try {
-        const messageString = JSON.stringify(message);
-        const messageBuffer = Buffer.from(messageString);
+        console.log("🔌 Új RabbitMQ kapcsolat felépítése (ébredés után)...");
+        sharedConnection = await amqp.connect(CLOUDAMQP_URL);
+        sharedChannel = await sharedConnection.createChannel();
 
-        // 1. Exchange deklarálása (marad)
+        // Mindenképp deklaráljuk a struktúrát, biztos ami biztos
         await sharedChannel.assertExchange(EXCHANGE_NAME, 'fanout', { durable: true });
-
-        // 2. ÚJ: Sor deklarálása a Producernél is!
-        // Fontos: a név (pl. 'hibak_sora') egyezzen a Consumerével!
-        const QUEUE_NAME = 'hibajelentesek_sora';
-        await sharedChannel.assertQueue(QUEUE_NAME, {
-            durable: true,    // Túlélje a restartot
-            exclusive: false,
-            autoDelete: false // Ne törölje le magát, ha nincs consumer!
-        });
-
-        // 3. ÚJ: Összekötjük a sort az exchange-el
-        // Ez mondja meg a RabbitMQ-nak, hogy amit az exchange kap, azt tegye ebbe a sorba
+        await sharedChannel.assertQueue(QUEUE_NAME, { durable: true, autoDelete: false });
         await sharedChannel.bindQueue(QUEUE_NAME, EXCHANGE_NAME, '');
 
-        // 4. Publikálás (marad a persistent: true)
-        const sent = await sharedChannel.publish(
-            EXCHANGE_NAME,
-            '',
-            messageBuffer,
-            { persistent: true }
-        );
+        // Ha a kapcsolat hiba miatt szakad meg, nullázzuk a változókat
+        sharedConnection.on("error", () => {
+            console.error("AMQP hiba, változók nullázása...");
+            sharedConnection = null; sharedChannel = null;
+        });
+        sharedConnection.on("close", () => {
+            console.error("AMQP hiba, váratlan leállás...");
+            sharedConnection = null; sharedChannel = null;
+        });
 
-        if (sent) {
-            console.log("✅ Üzenet elküldve.");
-        } else {
-            console.error("❌ Hiba az üzenet küldésekor (backpressure).");
-        }
-    } catch (error) {
-        console.error("❌ Hiba történt az üzenetküldés során:", error.message);
+        return sharedChannel;
+    } catch (err) {
+        console.error("❌ RabbitMQ hiba:", err);
+        return null;
     }
 }
+
+/**
+ * RENDER sends our service to sleep after 15 minutes.
+ * We have to close the AMQP connection and logging out this event.
+ */
+const gracefulShutdown = async () => {
+    console.log("⚠️ Render leállási jel érkezett. Kapcsolatok zárása...");
+    try {
+        if (channel) {
+            await channel.close();
+            console.log("✅ RabbitMQ csatorna lezárva.");
+        }
+        if (connection) {
+            await connection.close();
+            console.log("✅ RabbitMQ kapcsolat lezárva.");
+        }
+    } catch (err) {
+        console.error("Hiba a leállás során:", err);
+    } finally {
+        process.exit(0);
+    }
+};
+
+/**
+ * 
+ */
+const createUniqeIDFromTimeStamp = function (timeStamp) {
+    return timeStamp ? timeStamp.getTime().toString(36) + Math.random().toString(36).substring(2, 10) : null;
+}
+
 
 app.use(cors()); // Ez engedélyezi a CORS-t mindenki számára
 app.use(express.json());
@@ -79,35 +104,37 @@ app.get('/keepalive', (req, res) => {
  * 
  */
 app.post('/uzenet', async (req, res) => {
-    console.log("Adat érkezett:", req.body);
+    const activeChannel = await getChannel();
 
-    try {
-
-        sharedConnection = await amqp.connect(CLOUDAMQP_URL);
-        sharedChannel = await sharedConnection.createChannel();
-
-        await sendMessage({
-            id: '1',
-            topic: 'hibabejelento',
-            message: req.body,
-            timestamp: new Date().toISOString()
-        });
-
-        res.status(200).send({ status: "Siker!" });
-
-        // Várjunk 100 milliszekundumot (ez általában elég)
-        await new Promise(resolve => setTimeout(resolve, 100));
-
-        if (sharedConnection) {
-            console.log('Close AMQP connection.');
-            await sharedConnection.close();
-        }
-
-    } catch (error) {
-        console.error("🚨 KRITIKUS HIBA: Nem sikerült csatlakozni a RabbitMQ-hoz!", error.message);
-        return; // Ha a kapcsolat hibás, állítsuk le a játékot
+    if (!activeChannel) {
+        return res.status(500).json({ hiba: "Nem sikerült kapcsolódni az üzenetsorhoz" });
     }
 
+    const uniqeID = createUniqeIDFromTimeStamp(new Date())
+
+    const message = {
+        id: uniqeID,
+        topic: 'hibabejelento',
+        message: Buffer.from(JSON.stringify(req.body)),
+        timestamp: new Date().toISOString()
+    };
+
+    const sent = activeChannel.publish(
+        EXCHANGE_NAME,
+        '',
+        message,
+        { persistent: true }
+    );
+
+    if (sent) {
+        res.status(202).json({ status: "Siker, az üzenet a sorban!" });
+    } else {
+        res.status(500).json({ hiba: "A sor megtelt vagy hiba történt" });
+    }
 });
 
 app.listen(3000, () => console.log("Szerver fut a 3000-es porton"));
+
+// Figyeljük a Render (vagy a Node) leállító jeleit
+process.on('SIGTERM', gracefulShutdown); // A Render ezt küldi leálláskor
+process.on('SIGINT', gracefulShutdown);  // Ez a Ctrl+C-re reagál (helyi teszteléskor)
